@@ -90,7 +90,7 @@
 
 <div id="joyBase"><div id="joyStick"></div></div>
 <div id="joyHint">← ひだりがわ:あるく</div>
-<div id="fireHint">みぎがわ おしっぱなし:ためる →<br>ゆびをうごかして なぎはらえ!</div>
+<div id="fireHint">タップ:せんしゃ・せんとうきに ロックオン<br>ながおし+ゆびをうごかす:じゆうレーザー</div>
 <div id="gaugeLabel">レーザー</div>
 <div id="gaugeWrap"><div id="gaugeFill"></div></div>
 <div id="flash"></div>
@@ -101,7 +101,8 @@
     きみは むてきの だいかいじゅう。<br>
     こうげきされても びくともしない。<br>
     くちから あおじろい レーザーを はいて<br>
-    ビル・せんしゃ・せんとうき・くるまを はかいしよう!
+    タップで せんしゃ・せんとうきに ロックオン<br>
+    ながおしで じゆうレーザー、ビル・くるまを はかいしよう!
   </div>
   <button class="mbtn" id="btnTime">⏱ タイムアタック<small>120びょうで どれだけ こわせるか!</small></button>
   <button class="mbtn" id="btnFree">🌆 じゆうに あばれる<small>じかんせいげん なし</small></button>
@@ -145,17 +146,20 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x070b18);
-scene.fog = new THREE.FogExp2(0x070b18, 0.0028);
+scene.background = new THREE.Color(0x141c30);
+scene.fog = new THREE.FogExp2(0x141c30, 0.0016);
 
 const camera = new THREE.PerspectiveCamera(58, innerWidth/innerHeight, 0.5, 1600);
 camera.position.set(0, 60, -90);
 
 /* 薄暗い夜の街:月光+街あかり */
-scene.add(new THREE.HemisphereLight(0x33456e, 0x0a0c14, 0.75));
-const moon = new THREE.DirectionalLight(0x8fa8d8, 0.55);
+scene.add(new THREE.HemisphereLight(0x5a76ac, 0x232b40, 1.3));
+const moon = new THREE.DirectionalLight(0xaec2e8, 1.0);
 moon.position.set(-120, 220, -80);
 scene.add(moon);
+const fillLight = new THREE.DirectionalLight(0x4a5f8f, 0.4);
+fillLight.position.set(140, 120, 100);
+scene.add(fillLight);
 /* 口もとのチャージ光(街を青白く照らす) */
 const mouthLight = new THREE.PointLight(0x8fd4ff, 0, 420, 1.6);
 scene.add(mouthLight);
@@ -208,13 +212,13 @@ const CELL = 80;                  // 区画サイズ(建物60 + 道路20)
 const HALF = CITY/2;
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(CITY*2.4, CITY*2.4),
-  new THREE.MeshLambertMaterial({color:0x141a26})
+  new THREE.MeshLambertMaterial({color:0x2a3348})
 );
 ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
 /* 道路(明るめのライン)と街灯 */
-const roadMat = new THREE.MeshLambertMaterial({color:0x232a3a});
+const roadMat = new THREE.MeshLambertMaterial({color:0x3d4760});
 const roads = new THREE.Group(); scene.add(roads);
 for(let i=-HALF; i<=HALF; i+=CELL){
   const r1=new THREE.Mesh(new THREE.PlaneGeometry(20, CITY), roadMat);
@@ -240,7 +244,7 @@ const windowTexBase = makeWindowTex();
 const buildings = [];
 const bldGeo = new THREE.BoxGeometry(1,1,1);
 bldGeo.translate(0,0.5,0);   // 底が原点
-const bldColors=[0x2a3448,0x33405a,0x263043,0x3a465e,0x2e3a52];
+const bldColors=[0x455577,0x4f6088,0x3f4e6e,0x536590,0x445374];
 for(let gx=-HALF+CELL/2; gx<HALF; gx+=CELL){
   for(let gz=-HALF+CELL/2; gz<HALF; gz+=CELL){
     if(Math.abs(gx)<CELL && Math.abs(gz)<CELL) continue;   // 中央は広場
@@ -389,8 +393,8 @@ function updateFires(dt,t){
    ========================================================= */
 const kaiju = new THREE.Group(); scene.add(kaiju);
 const K = { h:0, speed:0, walkPhase:0, x:0, z:0 };
-const bodyMat = new THREE.MeshLambertMaterial({color:0x2c3138});
-const bellyMat= new THREE.MeshLambertMaterial({color:0x4a4f58});
+const bodyMat = new THREE.MeshLambertMaterial({color:0x3d434d});
+const bellyMat= new THREE.MeshLambertMaterial({color:0x5c6270});
 const spineMat= ()=>new THREE.MeshLambertMaterial({color:0x1d2126, emissive:0x66ccff, emissiveIntensity:0});
 
 let legL, legR, armL, armR, headGrp, jaw, tailSegs=[], spines=[], torso;
@@ -478,6 +482,24 @@ const muzzleSprite=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:
 muzzleSprite.visible=false; scene.add(muzzleSprite);
 
 const beam = { state:'idle', charge:0, energy:0, aimYaw:0, aimPitch:-0.12, cooldown:0, power:1 };
+
+/* ---------- ロックオンビーム(タップで発射、複数本まで同時) ---------- */
+const LOCK_N = 4;
+const lockBeams = [];
+{
+  for(let i=0;i<LOCK_N;i++){
+    const core=new THREE.Mesh(beamCylGeo, new THREE.MeshBasicMaterial({color:0xeaf8ff}));
+    const glow=new THREE.Mesh(beamCylGeo, new THREE.MeshBasicMaterial({color:0x6fc4ff, transparent:true, opacity:0.5, depthWrite:false, blending:THREE.AdditiveBlending, side:THREE.DoubleSide}));
+    const grp=new THREE.Group(); grp.add(glow,core); grp.visible=false;
+    scene.add(grp);
+    const ring=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:0xdff2ff,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending}));
+    ring.visible=false; scene.add(ring);
+    lockBeams.push({grp, core, glow, ring, active:false, target:null, kind:null, life:0, maxLife:0});
+  }
+}
+/* ロックオンの狙い定めリング(ターゲット選定時に表示) */
+const lockMarker=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:0xff5a5a,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}));
+lockMarker.scale.set(10,10,1); scene.add(lockMarker);
 
 /* =========================================================
    のりもの:くるま / せんしゃ / せんとうき
@@ -665,20 +687,43 @@ function stopBeamSnd(){
   for(const k of ['o1','o2','o3','n','lfo']) beamNodes[k].stop(t+0.6);
   beamNodes=null;
 }
+function sndLockFire(n){
+  if(!AC) return; const t=AC.currentTime;
+  for(let i=0;i<n;i++){
+    const dt0=i*0.06;
+    const o=AC.createOscillator(); o.type='square';
+    o.frequency.setValueAtTime(900,t+dt0); o.frequency.exponentialRampToValueAtTime(220,t+dt0+0.18);
+    const g=AC.createGain(); env(g,t+dt0,0.004,0.35,0.16);
+    o.connect(g); g.connect(master); o.start(t+dt0); o.stop(t+dt0+0.2);
+  }
+}
 function sndRoar(){
   if(!AC) return; const t=AC.currentTime;
+  const dur=1.8;
   const o=AC.createOscillator(); o.type='sawtooth';
-  o.frequency.setValueAtTime(180,t);
-  o.frequency.exponentialRampToValueAtTime(55,t+0.9);
+  o.frequency.setValueAtTime(150,t);
+  o.frequency.exponentialRampToValueAtTime(85,t+0.5);
+  o.frequency.exponentialRampToValueAtTime(45,t+dur);
   const sh=AC.createWaveShaper();
   { const c=new Float32Array(256); for(let i=0;i<256;i++){const x=i/128-1; c[i]=Math.tanh(5*x);} sh.curve=c; }
-  const g=AC.createGain(); env(g,t,0.04,0.8,1.0);
-  const n=AC.createBufferSource(); n.buffer=getNoise();
-  const nf=AC.createBiquadFilter(); nf.type='bandpass'; nf.frequency.value=500; nf.Q.value=2;
-  const ng=AC.createGain(); env(ng,t,0.04,0.35,0.9);
+  const g=AC.createGain();
+  g.gain.setValueAtTime(0.0001,t);
+  g.gain.linearRampToValueAtTime(0.85,t+0.12);
+  g.gain.setTargetAtTime(0.7,t+0.3,0.3);
+  g.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  const n=AC.createBufferSource(); n.buffer=getNoise(); n.loop=true;
+  const nf=AC.createBiquadFilter(); nf.type='bandpass'; nf.frequency.setValueAtTime(450,t); nf.frequency.linearRampToValueAtTime(280,t+dur); nf.Q.value=1.6;
+  const ng=AC.createGain();
+  ng.gain.setValueAtTime(0.0001,t);
+  ng.gain.linearRampToValueAtTime(0.4,t+0.15);
+  ng.gain.exponentialRampToValueAtTime(0.0001,t+dur);
+  /* うなりのビブラート */
+  const lfo=AC.createOscillator(); lfo.frequency.value=6.5;
+  const lg=AC.createGain(); lg.gain.value=8;
+  lfo.connect(lg); lg.connect(o.frequency);
   o.connect(sh); sh.connect(g); g.connect(master);
   n.connect(nf); nf.connect(ng); ng.connect(master);
-  o.start(t); o.stop(t+1.2); n.start(t); n.stop(t+1.1);
+  o.start(t); o.stop(t+dur+0.1); n.start(t); n.stop(t+dur+0.1); lfo.start(t); lfo.stop(t+dur+0.1);
 }
 function startBGM(){
   if(bgmTimer) return;
@@ -804,8 +849,9 @@ function killJet(j){
    入力(ポインタ):左=ジョイスティック / 右=ためて なぎはらう
    ========================================================= */
 const joy={active:false, id:-1, cx:0, cy:0, x:0, y:0};
-const fire={active:false, id:-1, sx:0, sy:0, x:0, y:0};
+const fire={active:false, id:-1, sx:0, sy:0, x:0, y:0, moved:0, downT:0, holdFired:false};
 const joyBase=el('joyBase'), joyStick=el('joyStick');
+const TAP_MAX_TIME=0.22, TAP_MAX_MOVE=18, HOLD_START=0.16;
 
 function onDown(e){
   initAudio();
@@ -818,7 +864,7 @@ function onDown(e){
     joyStick.style.left='37px'; joyStick.style.top='37px';
   }else if(x>=innerWidth*0.42 && !fire.active){
     fire.active=true; fire.id=e.pointerId; fire.sx=x; fire.sy=y; fire.x=x; fire.y=y;
-    startCharge();
+    fire.moved=0; fire.downT=0; fire.holdFired=false;
   }
 }
 function onMove(e){
@@ -830,6 +876,7 @@ function onMove(e){
     joyStick.style.left=(37+dx)+'px'; joyStick.style.top=(37+dy)+'px';
   }
   if(fire.active && e.pointerId===fire.id){
+    fire.moved=Math.max(fire.moved, Math.hypot(e.clientX-fire.sx, e.clientY-fire.sy));
     fire.x=e.clientX; fire.y=e.clientY;
   }
 }
@@ -839,7 +886,13 @@ function onUp(e){
   }
   if(fire.active && e.pointerId===fire.id){
     fire.active=false;
-    releaseCharge();
+    if(beam.state==='charge' || beam.state==='fire'){
+      /* 長押ししていた → 自由レーザーの解放 */
+      releaseCharge();
+    }else if(fire.downT<TAP_MAX_TIME && fire.moved<TAP_MAX_MOVE){
+      /* タップ → ロックオン発射 */
+      tryLockOnFire();
+    }
   }
 }
 addEventListener('pointerdown', onDown);
@@ -865,6 +918,29 @@ function releaseCharge(){
     endBeam();
   }
 }
+function tryLockOnFire(){
+  if(beam.cooldown>0) return;
+  /* いちばん近い戦車/戦闘機を最大2体、ロックオン */
+  const cands=[];
+  for(const tk of tanks) if(tk.state==='live') cands.push({obj:tk, kind:'tank', pos:tk.g.position, d:tk.g.position.distanceTo(kaiju.position)});
+  for(const j of jets) if(j.state==='live') cands.push({obj:j, kind:'jet', pos:j.g.position, d:j.g.position.distanceTo(kaiju.position)});
+  cands.sort((a,b)=>a.d-b.d);
+  const picks=cands.slice(0, LOCK_N);
+  if(picks.length===0){
+    popText(new THREE.Vector3(K.x,40,K.z), 'ロックオンできる てきが いない');
+    return;
+  }
+  let used=0;
+  for(const p of picks){
+    const lb=lockBeams[used++];
+    lb.active=true; lb.target=p.obj; lb.kind=p.kind;
+    lb.life=0; lb.maxLife=0.55;
+    lb.grp.visible=true; lb.ring.visible=true;
+  }
+  sndLockFire(picks.length);
+  screenFlash(0.2);
+  state.shake=Math.min(1,state.shake+0.25);
+}
 function fireBeam(){
   beam.state='fire';
   beam.power=beam.charge;
@@ -887,32 +963,47 @@ camBtn.addEventListener('pointerdown', e=>{
   camBtn.firstChild.textContent=CAM_NAMES[state.camMode];
 });
 /* ほえる */
+let roarT=-1;
 roarBtn.addEventListener('pointerdown', e=>{
   e.stopPropagation(); initAudio();
   if(state.phase!=='play' || state.roarCool>0) return;
-  state.roarCool=5;
+  state.roarCool=7;
+  roarT=0;
   sndRoar();
-  state.shake=Math.min(1.6, state.shake+0.9);
-  shockwave();
+  jaw.userData.roaring=true;
+  jaw.userData.shockDone=false;
 });
-/* しょうげきは:近くの車・戦車をふっとばす */
-const shockMesh=new THREE.Mesh(new THREE.RingGeometry(0.9,1,40),
+/* しょうげきは:遠くまで届き、車・戦車をふっとばし、ビルを揺らし、戦闘機をよろめかせる */
+const shockMesh=new THREE.Mesh(new THREE.RingGeometry(0.9,1,48),
   new THREE.MeshBasicMaterial({color:0xbfe8ff, transparent:true, opacity:0, side:THREE.DoubleSide, depthWrite:false, blending:THREE.AdditiveBlending}));
 shockMesh.rotation.x=-Math.PI/2; shockMesh.position.y=1; scene.add(shockMesh);
+const shockMesh2=shockMesh.clone(); shockMesh2.material=shockMesh.material.clone(); scene.add(shockMesh2);
 let shockT=-1;
+const shockRadius=220;
 function shockwave(){
   shockT=0;
   shockMesh.position.set(K.x,1,K.z);
+  shockMesh2.position.set(K.x,1,K.z);
   const p=new THREE.Vector3(K.x,0,K.z);
   for(const c of cars){
     if(c.state!=='drive') continue;
     const d=c.g.position.distanceTo(p);
-    if(d<64){ const dir=c.g.position.clone().sub(p).normalize(); killCar(c,'fly',dir); }
+    if(d<shockRadius){ const dir=c.g.position.clone().sub(p).normalize(); killCar(c,'fly',dir); }
   }
-  for(const t of tanks){
-    if(t.state!=='live') continue;
-    const d=t.g.position.distanceTo(p);
-    if(d<64){ const dir=t.g.position.clone().sub(p).normalize(); killTank(t,dir); }
+  for(const tk of tanks){
+    if(tk.state!=='live') continue;
+    const d=tk.g.position.distanceTo(p);
+    if(d<shockRadius){ const dir=tk.g.position.clone().sub(p).normalize(); killTank(tk,dir); }
+  }
+  for(const j of jets){
+    if(j.state!=='live') continue;
+    const d=j.g.position.distanceTo(p);
+    if(d<shockRadius+60) j.wobble=1.0;
+  }
+  for(const b of buildings){
+    if(!b.alive) continue;
+    const d=Math.hypot(b.x-K.x, b.z-K.z);
+    if(d<shockRadius) b.shakeT=0.9*(1-d/(shockRadius+40));
   }
 }
 
@@ -927,7 +1018,7 @@ function resetWorld(){
   kaiju.position.set(0,0,0); kaiju.rotation.y=0;
   endBeam(); beam.state='idle'; beam.cooldown=0;
   for(const b of buildings){
-    b.alive=true; b.falling=0; b.hp=b.maxHp;
+    b.alive=true; b.falling=0; b.hp=b.maxHp; b.shakeT=0;
     b.mesh.visible=true; b.mesh.scale.y=b.h; b.mesh.rotation.set(0,0,0); b.mesh.position.y=0;
   }
   for(const c of cars){
@@ -936,9 +1027,11 @@ function resetWorld(){
     c.g.children.forEach(m=>{ if(m.material&&m.material.color) m.material.color.setHex(m===c.g.children[0]||m===c.g.children[1]?c.col:0xffe9a8); });
   }
   for(const t of tanks){ t.state='live'; t.g.rotation.set(0,0,0); t.g.position.y=0; t.g.visible=true; }
-  for(const j of jets){ j.state='live'; j.g.visible=true; }
+  for(const j of jets){ j.state='live'; j.g.visible=true; j.wobble=0; }
   for(const d of debris){ d.life=0; d.mesh.visible=false; }
   for(const f of fires){ f.life=0; f.mesh.visible=false; }
+  for(const lb of lockBeams){ lb.active=false; lb.grp.visible=false; lb.ring.visible=false; }
+  roarT=-1; shockT=-1; jaw.userData.roaring=false; jaw.userData.shockDone=false;
 }
 function startGame(mode){
   initAudio();
@@ -1031,6 +1124,22 @@ function tick(now){
     roarBtn.classList.toggle('cool', state.roarCool>0);
     beam.cooldown=Math.max(0,beam.cooldown-dt);
 
+    /* --- 咆哮アニメ --- */
+    if(roarT>=0){
+      roarT+=dt;
+      const ROAR_DUR=1.8;
+      const op=clamp(roarT/0.25,0,1)*clamp((ROAR_DUR-roarT)/0.4,0,1);
+      jaw.rotation.x=0.35+op*0.55+Math.sin(t*18)*0.05*op;
+      headGrp.rotation.x=lerp(headGrp.rotation.x,-0.18*op,10*dt);
+      state.shake=Math.max(state.shake, 0.5*op);
+      /* 咆哮の山で衝撃波を発動 */
+      if(!jaw.userData.shockDone && roarT>0.35){
+        jaw.userData.shockDone=true;
+        shockwave();
+      }
+      if(roarT>ROAR_DUR){ roarT=-1; jaw.userData.roaring=false; jaw.userData.shockDone=false; }
+    }
+
     /* --- かいじゅう移動 --- */
     const jl=Math.hypot(joy.x,joy.y);
     if(jl>0.12){
@@ -1106,6 +1215,12 @@ function tick(now){
 
     /* --- レーザー狙い(スワイプ) --- */
     if(fire.active){
+      fire.downT+=dt;
+      /* 一定時間押し続けたら自由レーザーのチャージへ昇格 */
+      if(!fire.holdFired && fire.downT>=HOLD_START && beam.state==='idle' && beam.cooldown<=0){
+        fire.holdFired=true;
+        startCharge();
+      }
       const dx=(fire.x-fire.sx)/innerWidth, dy=(fire.y-fire.sy)/innerHeight;
       beam.aimYaw = clamp(dx*3.4, -1.5, 1.5);
       beam.aimPitch = clamp(-0.12 - dy*1.6, -0.5, 0.35);
@@ -1276,6 +1391,10 @@ function tick(now){
         j.g.position.lerp(tmpV, 0.6);
         tmpV2.set(K.x+Math.cos(j.ang+0.25)*j.r, j.h, K.z+Math.sin(j.ang+0.25)*j.r);
         j.g.lookAt(tmpV2);
+        if(j.wobble>0){
+          j.g.rotateZ(Math.sin(t*14)*0.5*j.wobble);
+          j.g.position.y+=Math.sin(t*11)*4*j.wobble;
+        }
         j.shotT-=dt;
         if(j.shotT<=0){ j.shotT=rand(3,7); fireShell(j.g.position); }
       }else if(j.state==='fall'){
@@ -1303,13 +1422,57 @@ function tick(now){
         sh.active=false; sh.s.visible=false;
       }
     }
-    /* しょうげきは */
+    /* --- ロックオンビーム更新 --- */
+    headGrp.userData.mouth.getWorldPosition(mouthPos);
+    for(const lb of lockBeams){
+      if(!lb.active) continue;
+      lb.life+=dt;
+      const f=clamp(lb.life/lb.maxLife,0,1);
+      const alive = lb.target.state==='live';
+      if(!alive || f>=1){
+        if(alive && f>=1){
+          if(lb.kind==='tank'){ tmpV2.copy(lb.target.g.position).sub(mouthPos); tmpV2.y=0; tmpV2.normalize(); killTank(lb.target,tmpV2); }
+          else killJet(lb.target);
+        }
+        lb.active=false; lb.grp.visible=false; lb.ring.visible=false;
+        continue;
+      }
+      const tgtPos = lb.kind==='tank' ? tmpV.copy(lb.target.g.position).setY(4) : lb.target.g.position;
+      const dir=tmpV2.copy(tgtPos).sub(mouthPos);
+      const len=Math.max(0.1,dir.length()); dir.normalize();
+      lb.grp.position.copy(mouthPos).addScaledVector(dir,len/2);
+      lb.grp.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0), dir);
+      const th=0.35+Math.sin(f*Math.PI)*0.35;
+      lb.core.scale.set(th,len,th);
+      lb.glow.scale.set(th*2.6,len,th*2.6);
+      lb.ring.position.copy(tgtPos);
+      lb.ring.scale.setScalar(6+Math.sin(t*30)*1.5);
+      sparks.spawn(tgtPos,1.5,10,14,0xbfe8ff,0.25,50);
+    }
+
+    /* --- ジェットのよろめき(咆哮の衝撃) --- */
+    for(const j of jets){
+      if(j.wobble>0) j.wobble=Math.max(0,j.wobble-dt*0.6);
+    }
+    /* --- ビル揺れ(咆哮の余韻) --- */
+    for(const b of buildings){
+      if(!b.alive || !b.shakeT || b.shakeT<=0) continue;
+      b.shakeT-=dt;
+      const f=Math.max(0,b.shakeT)/0.9;
+      b.mesh.rotation.z=Math.sin(t*24+b.x)*0.06*f;
+      b.mesh.rotation.x=Math.cos(t*21+b.z)*0.05*f;
+      if(b.shakeT<=0) b.mesh.rotation.set(0,0,0);
+    }
+
+    /* しょうげきは(遠くまで届く二重リング) */
     if(shockT>=0){
       shockT+=dt;
-      const r=shockT*140;
+      const r=shockT*(shockRadius/0.85);
       shockMesh.scale.setScalar(r);
-      shockMesh.material.opacity=clamp(0.8-shockT*1.2,0,1);
-      if(shockT>0.8) shockT=-1;
+      shockMesh.material.opacity=clamp(0.85-shockT*1.0,0,1);
+      shockMesh2.scale.setScalar(Math.max(0,r-30));
+      shockMesh2.material.opacity=clamp(0.6-shockT*1.0,0,1);
+      if(shockT>0.9) shockT=-1;
     }
   }
 
@@ -1380,9 +1543,13 @@ const __G = {
     cycleCam:()=>{state.camMode=(state.camMode+1)%3;},
     teleport:(x,z)=>{K.x=x; K.z=z;},
     aliveBuildings:()=>buildings.filter(b=>b.alive).length,
+    lockOnTap:()=>tryLockOnFire(),
+    roar:()=>{ if(state.roarCool<=0){ state.roarCool=7; roarT=0; sndRoar(); jaw.userData.roaring=true; jaw.userData.shockDone=false; } },
   }
 };
 window.__G=__G;
+window.__G.lockBeams=lockBeams;
+window.__G.roarState={get t(){return roarT;}, get shockT(){return shockT;}};
 </script>
 </body>
 </html>
