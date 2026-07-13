@@ -421,14 +421,6 @@ let legL, legR, armL, armR, headGrp, jaw, tailSegs=[], spines=[], torso;
     const e=new THREE.Mesh(new THREE.SphereGeometry(0.7,8,8), eyeMat);
     e.position.set(2.6*s,2.6,4.6); headGrp.add(e);
   }
-  /* ツノ */
-  const hornMat=new THREE.MeshLambertMaterial({color:0x22262d});
-  for(const s of [-1,1]){
-    const horn=new THREE.Mesh(new THREE.ConeGeometry(0.75,4.6,6), hornMat);
-    horn.position.set(1.8*s,4.6,1.6);
-    horn.rotation.z=-0.35*s; horn.rotation.x=-0.28;
-    headGrp.add(horn);
-  }
   /* 口アンカー */
   const mouthAnchor=new THREE.Object3D(); mouthAnchor.position.set(0,0.4,9); headGrp.add(mouthAnchor);
   headGrp.userData.mouth=mouthAnchor;
@@ -461,19 +453,56 @@ let legL, legR, armL, armR, headGrp, jaw, tailSegs=[], spines=[], torso;
     seg.position.set(px, py-i*1.1, pz-i*4.2);
     kaiju.add(seg); tailSegs.push(seg);
   }
-  /* 背びれ(しっぽ→頭へ、チャージで順に発光) */
-  const spinePts=[];
-  for(let i=0;i<6;i++) spinePts.push([0, 21-i*1.0, -8-i*4.0, 2.2-i*0.22]);      // しっぽ側
-  for(let i=0;i<7;i++) spinePts.push([0, 22+i*3.4, -6+i*0.7, 3.4-i*0.15]);      // 背中
-  for(const [x,y,z,s] of spinePts){
-    const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.55, s*2.6, 4), spineMat());
-    sp.position.set(x,y,z); sp.rotation.x=-0.4;
+
+  /* ===== モヒカン状のツノ・背びれ:頭のてっぺん→首すじ→背中→しっぽ、ぜんぶ連続 ===== */
+  /* 頭部(headGrp座標系):頭頂に沿って大ぶりのツノを並べる */
+  const headHornPts=[
+    [5.2, 6.5, 1.7], [5.8,4.2,2.0], [6.1,1.6,2.1], [5.7,-0.8,1.8],
+  ];
+  for(const [y,z,s] of headHornPts){
+    const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.5, s*2.4, 4), spineMat());
+    sp.position.set(0,y,z); sp.rotation.x=-0.45;
+    headGrp.add(sp); spines.push(sp);
+  }
+  /* 首すじ(torso座標系):頭のつけ根〜肩の上まで */
+  const neckHornPts=[
+    [37.8,3.0,1.6],[36.0,4.0,1.2],[34.0,5.6,0.6],
+  ];
+  for(const [y,s,z] of neckHornPts){
+    const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.5, s*2.4, 4), spineMat());
+    sp.position.set(0,y,z); sp.rotation.x=-0.4;
+    torso.add(sp); spines.push(sp);
+  }
+  /* 背中(kaiju座標系):肩から腰まで、だんだん大きく密に。中央+左右にも小ぶりのトゲを添える */
+  const backHornPts=[];
+  for(let i=0;i<11;i++) backHornPts.push([0, 21+i*1.9, -5+i*0.45, 4.2-i*0.16]);
+  for(const [x,y,z,s] of backHornPts){
+    const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.5, s*2.5, 4), spineMat());
+    sp.position.set(x,y,z); sp.rotation.x=-0.42;
     kaiju.add(sp); spines.push(sp);
+  }
+  /* 背中の左右にも小さめのトゲを1列ずつ添えて厚みを出す */
+  for(const side of [-1,1]){
+    for(let i=0;i<7;i++){
+      const s=2.2-i*0.15;
+      const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.45, s*2.0, 4), spineMat());
+      sp.position.set(2.6*side, 23+i*2.1, -3+i*0.4);
+      sp.rotation.x=-0.4; sp.rotation.z=0.55*side;
+      kaiju.add(sp); spines.push(sp);
+    }
+  }
+  /* しっぽのトゲ:各しっぽセグメントの子として追加 → しっぽの揺れに自動追従 */
+  for(let i=0;i<tailSegs.length;i++){
+    const r=3.6-i*0.45;
+    const sp=new THREE.Mesh(new THREE.ConeGeometry(r*0.5, r*2.3, 4), spineMat());
+    sp.position.set(0, r*0.85, 0); sp.rotation.x=-0.35;
+    tailSegs[i].add(sp); spines.push(sp);
   }
 }
 /* 背びれ用の背面グロー */
 const spineGlow=new THREE.Sprite(new THREE.SpriteMaterial({map:glowTex,color:0x66ccff,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending}));
 spineGlow.scale.set(46,60,1); spineGlow.position.set(0,30,-8); kaiju.add(spineGlow);
+
 
 /* =========================================================
    レーザービーム
@@ -1067,6 +1096,7 @@ el('btnRetry').addEventListener('pointerdown', e=>{e.stopPropagation(); el('resu
    ========================================================= */
 const mouthPos=new THREE.Vector3(), beamDir=new THREE.Vector3(), beamEnd=new THREE.Vector3();
 const tmpV=new THREE.Vector3(), tmpV2=new THREE.Vector3();
+const camRightVec=new THREE.Vector3(), camFwdVec=new THREE.Vector3(), moveDirVec=new THREE.Vector3();
 
 /* レイ vs 建物AABB(XZスラブ+高さ) */
 function rayHitBuilding(o, d, maxT){
@@ -1148,15 +1178,22 @@ function tick(now){
     /* --- かいじゅう移動 --- */
     const jl=Math.hypot(joy.x,joy.y);
     if(jl>0.12){
-      /* カメラが今向いている「前方向」(怪獣を見ている向き)を基準に、
-         ジョイスティックの上=奥、右=右 になるよう回転させる */
-      camera.getWorldDirection(tmpV);
-      const camFacingYaw=Math.atan2(tmpV.x, tmpV.z);
-      const targetH=Math.atan2(joy.x,-joy.y);
-      let want=camFacingYaw+targetH;
-      let dh=((want-K.h+Math.PI*3)%TAU)-Math.PI;
-      K.h+=clamp(dh, -2.2*dt, 2.2*dt);
-      K.speed=lerp(K.speed, 26*jl, 6*dt);
+      /* カメラの実際のワールド軸(右方向・前方向)を直接取り出して合成する。
+         画面の右にスワイプ/倒す = 画面上で右に動く、が保証される確実な方法。 */
+      camRightVec.setFromMatrixColumn(camera.matrixWorld, 0);  // カメラのローカルX(右)
+      camFwdVec.setFromMatrixColumn(camera.matrixWorld, 2).multiplyScalar(-1); // ローカル-Z(前)
+      camRightVec.y=0; camFwdVec.y=0;
+      if(camRightVec.lengthSq()>1e-6) camRightVec.normalize();
+      if(camFwdVec.lengthSq()>1e-6) camFwdVec.normalize();
+      moveDirVec.set(0,0,0)
+        .addScaledVector(camRightVec, joy.x)
+        .addScaledVector(camFwdVec, -joy.y);
+      if(moveDirVec.lengthSq()>1e-6){
+        const want=Math.atan2(moveDirVec.x, moveDirVec.z);
+        let dh=((want-K.h+Math.PI*3)%TAU)-Math.PI;
+        K.h+=clamp(dh, -0.8*dt, 0.8*dt);   // 旋回はゆっくり(以前の1/3弱)
+      }
+      K.speed=lerp(K.speed, 22*jl, 5*dt);
     }else{
       K.speed=lerp(K.speed,0,8*dt);
     }
@@ -1272,8 +1309,16 @@ function tick(now){
         startCharge();
       }
       const dx=(fire.x-fire.sx)/innerWidth, dy=(fire.y-fire.sy)/innerHeight;
-      beam.aimYaw = clamp(dx*3.4, -1.5, 1.5);
-      beam.aimPitch = clamp(-0.12 - dy*1.6, -0.5, 0.35);
+      /* 画面の右にドラッグ=カメラから見て右へ、を保証するため、
+         カメラの実際の右ベクトルを使って狙い方向を計算する(移動と同じ考え方) */
+      camRightVec.setFromMatrixColumn(camera.matrixWorld, 0);
+      camRightVec.y=0;
+      if(camRightVec.lengthSq()>1e-6) camRightVec.normalize();
+      moveDirVec.set(Math.sin(K.h),0,Math.cos(K.h)).addScaledVector(camRightVec, dx*3.4);
+      const desiredWorldYaw=Math.atan2(moveDirVec.x, moveDirVec.z);
+      let dyaw=((desiredWorldYaw-K.h+Math.PI*3)%TAU)-Math.PI;
+      beam.aimYaw = clamp(dyaw, -1.5, 1.5);
+      beam.aimPitch = clamp(-0.12 - dy*2.6, -0.62, 0.48);
     }
     headGrp.rotation.y = lerp(headGrp.rotation.y, beam.aimYaw*0.55, 10*dt);
     headGrp.rotation.x = lerp(headGrp.rotation.x, -beam.aimPitch*0.5, 10*dt);
@@ -1599,7 +1644,7 @@ addEventListener('resize', ()=>{
    テストフック
    ========================================================= */
 const __G = {
-  ready:true, frames:0, state, beam, K, camera, kaiju,
+  ready:true, frames:0, state, beam, K, camera, kaiju, tailSegs,
   buildings, cars, tanks, jets,
   api:{
     start:(m='free')=>startGame(m),
@@ -1614,6 +1659,9 @@ const __G = {
     aliveBuildings:()=>buildings.filter(b=>b.alive).length,
     lockOnTap:()=>tryLockOnFire(),
     roar:()=>{ if(state.roarCool<=0){ state.roarCool=7; roarT=0; sndRoar(); jaw.userData.roaring=true; jaw.userData.shockDone=false; } },
+    fireDragStart:(x,y)=>{ fire.active=true; fire.sx=x; fire.sy=y; fire.x=x; fire.y=y; fire.downT=0.5; fire.holdFired=true; },
+    fireDragMove:(x,y)=>{ fire.x=x; fire.y=y; },
+    fireDragEnd:()=>{ fire.active=false; },
   }
 };
 window.__G=__G;
