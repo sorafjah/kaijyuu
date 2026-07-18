@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>大怪獣ジブンガ 〜てきを やきはらえ!〜</title>
+<title>大怪獣ジブンガ 〜やきはらえ!〜</title>
 <link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&display=swap" rel="stylesheet">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -96,7 +96,7 @@
 <div id="flash"></div>
 
 <div class="overlay" id="title">
-  <h1>大怪獣ジブンガ<span class="sub">〜 まちを やきはらえ! 〜</span></h1>
+  <h1>大怪獣ジブンガ<span class="sub">〜 やきはらえ! 〜</span></h1>
   <div class="desc">
     きみは むてきの だいかいじゅう。<br>
     こうげきされても びくともしない。<br>
@@ -395,7 +395,8 @@ const kaiju = new THREE.Group(); scene.add(kaiju);
 const K = { h:0, speed:0, walkPhase:0, x:0, z:0, punchT:0, punchSide:1, punchHit:false, punchTarget:null };
 const bodyMat = new THREE.MeshLambertMaterial({color:0x3d434d});
 const bellyMat= new THREE.MeshLambertMaterial({color:0x5c6270});
-const spineMat= ()=>new THREE.MeshLambertMaterial({color:0x1d2126, emissive:0x66ccff, emissiveIntensity:0});
+const IDLE_GLOW=0.16;   // 常時うっすら光らせる基準の明るさ
+const spineMat= ()=>new THREE.MeshLambertMaterial({color:0x1d2126, emissive:0x66ccff, emissiveIntensity:IDLE_GLOW});
 
 let legL, legR, armL, armR, headGrp, jaw, tailSegs=[], spines=[], torso;
 {
@@ -454,44 +455,30 @@ let legL, legR, armL, armR, headGrp, jaw, tailSegs=[], spines=[], torso;
     kaiju.add(seg); tailSegs.push(seg);
   }
 
-  /* ===== モヒカン状のツノ・背びれ:頭のてっぺん→首すじ→背中→しっぽ、ぜんぶ連続 ===== */
-  /* 頭部(headGrp座標系):頭頂に沿って大ぶりのツノを並べる */
-  const headHornPts=[
-    [5.2, 6.5, 1.7], [5.8,4.2,2.0], [6.1,1.6,2.1], [5.7,-0.8,1.8],
-  ];
-  for(const [y,z,s] of headHornPts){
-    const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.5, s*2.4, 4), spineMat());
-    sp.position.set(0,y,z); sp.rotation.x=-0.45;
-    headGrp.add(sp); spines.push(sp);
+  /* ===== モヒカン状のツノ・背びれ:頭のてっぺん→首すじ→背中→しっぽ、すきまなく連続させる =====
+     胴体(lower/upperシリンダー)の断面半径を計算し、そのすぐ外側(背中側)に
+     沿うように配置する。座標系のズレで体の中に埋まらないよう、すべて
+     kaiju直下の一つの座標系(静止姿勢基準)で統一して配置している。 */
+  function bodyRadiusAt(y){
+    if(y<26) return 9 - 1.5*clamp((y-12)/14,0,1);          // lower cylinder (y:12〜26)
+    return 7.5 - 2.3*clamp((y-25.5)/13,0,1);                 // upper cylinder (y:25.5〜38.5)
   }
-  /* 首すじ(torso座標系):頭のつけ根〜肩の上まで */
-  const neckHornPts=[
-    [37.8,3.0,1.6],[36.0,4.0,1.2],[34.0,5.6,0.6],
+  /* 背骨のキーポイント:腰→背中→肩→首→頭の後ろ→頭頂→鼻すじ(適度に間引いた本数) */
+  const spineCurve=[
+    [21,   -(bodyRadiusAt(21)+1.3), 3.4],
+    [27,   -(bodyRadiusAt(27)+1.2), 3.4],
+    [33,   -(bodyRadiusAt(33)+1.1), 2.9],
+    [38.5, -6.5, 2.3],   // 首の付け根(upper上端の高さ、体から十分に離す)
+    [46.0, -1.5, 2.0],   // 頭頂(後頭部寄り、skull上端より確実に高い)
+    [47.1,  2.2, 2.2],   // 頭頂中央〜前方
+    [46.3,  6.0, 1.6],   // 鼻すじ
   ];
-  for(const [y,s,z] of neckHornPts){
-    const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.5, s*2.4, 4), spineMat());
-    sp.position.set(0,y,z); sp.rotation.x=-0.4;
-    torso.add(sp); spines.push(sp);
-  }
-  /* 背中(kaiju座標系):肩から腰まで、だんだん大きく密に。中央+左右にも小ぶりのトゲを添える */
-  const backHornPts=[];
-  for(let i=0;i<11;i++) backHornPts.push([0, 21+i*1.9, -5+i*0.45, 4.2-i*0.16]);
-  for(const [x,y,z,s] of backHornPts){
+  for(const [y,z,s] of spineCurve){
     const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.5, s*2.5, 4), spineMat());
-    sp.position.set(x,y,z); sp.rotation.x=-0.42;
+    sp.position.set(0,y,z); sp.rotation.x=-0.42;
     kaiju.add(sp); spines.push(sp);
   }
-  /* 背中の左右にも小さめのトゲを1列ずつ添えて厚みを出す */
-  for(const side of [-1,1]){
-    for(let i=0;i<7;i++){
-      const s=2.2-i*0.15;
-      const sp=new THREE.Mesh(new THREE.ConeGeometry(s*0.45, s*2.0, 4), spineMat());
-      sp.position.set(2.6*side, 23+i*2.1, -3+i*0.4);
-      sp.rotation.x=-0.4; sp.rotation.z=0.55*side;
-      kaiju.add(sp); spines.push(sp);
-    }
-  }
-  /* しっぽのトゲ:各しっぽセグメントの子として追加 → しっぽの揺れに自動追従 */
+  /* しっぽのトゲ:各しっぽセグメントの子として追加 → しっぽの揺れに自動追従(背中の腰側と接続) */
   for(let i=0;i<tailSegs.length;i++){
     const r=3.6-i*0.45;
     const sp=new THREE.Mesh(new THREE.ConeGeometry(r*0.5, r*2.3, 4), spineMat());
@@ -1332,7 +1319,7 @@ function tick(now){
       /* 背びれ:しっぽ→頭へ順番に発光 */
       for(let i=0;i<spines.length;i++){
         const on=clamp(ch*(spines.length+3)-i, 0, 1);
-        spines[i].material.emissiveIntensity=on*(2.2+Math.sin(t*26+i)*0.5);
+        spines[i].material.emissiveIntensity=IDLE_GLOW+on*(2.2+Math.sin(t*26+i)*0.5-IDLE_GLOW);
       }
       spineGlow.material.opacity=ch*0.55;
       orb.scale.setScalar(ch*7*(1+0.2*Math.sin(t*30)));
@@ -1421,7 +1408,7 @@ function tick(now){
     }
     else{
       /* アイドル:光をおとす */
-      for(const sp of spines) sp.material.emissiveIntensity=lerp(sp.material.emissiveIntensity,0,6*dt);
+      for(const sp of spines) sp.material.emissiveIntensity=lerp(sp.material.emissiveIntensity,IDLE_GLOW,6*dt);
       spineGlow.material.opacity=lerp(spineGlow.material.opacity,0,6*dt);
       orb.scale.setScalar(lerp(orb.scale.x,0,8*dt));
       mouthLight.intensity=lerp(mouthLight.intensity,0,6*dt);
